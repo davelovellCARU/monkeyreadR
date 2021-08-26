@@ -1,4 +1,4 @@
-sm_names <- function(inputTable){
+
 
   myRepairFunc <- function(x){
   stringr::str_trim(
@@ -8,35 +8,36 @@ sm_names <- function(inputTable){
     ))}
 
 rename_sm <- function(x = NULL,
-                      n.options = 4,
-                      n.row.col = 5,
                       show.overview = TRUE,
                       outer.inner.sep = "_",
                       matrix.row.col.sep = ".",
-                      name.component.repair = NULL){
+                      name.component.repair = NULL,
+                      n.options = 4,
+                      n.row.col = 5){
 
   ## Making an SM re-namer
   ## This is not very robust, and makes assumptions about the meanings of characters.
   ### * If you put hyphens in your matrix questions, it will probably break.
 
-  suppressWarnings({
-
-  })
-
-  nameOuters <- tibble::tibble(outers = names(x)) # tibble is convenient for using tidyr::fill
+  xNames <- names(x)
+  nameOuters <- xNames
   nameInners <- as.character(x[1,])
-  responses <- x[-1,]
+  responses <- x[-1,] # Drop names row
 
-  ## Replace "X11" type values in nameOuters$outer with NA
-  # ("^X\\d+$" regex is a string starting with 'X', followed only by one or more digits)
-  nameOuters[["outers"]][ stringr::str_detect(nameOuters[["outers"]], "^X\\d+$") ] <- NA
-  # 'fill' NAs: c("Something", NA, NA, "hmm", NA) becomes c("Something", "Something", "Something", "hmm", "hmm")
-  nameOuters <- tidyr::fill(nameOuters, outers, .direction = "down")
-  nameOuters <- nameOuters$outers #No longer need this to be a tibble
+  startsWithX <- function(chars) stringr::str_detect(chars, "^X\\d+$")
+  nameOuters[startsWithX(nameOuters)] <- NA
+
+  fillHelper <- tibble::tibble(outers = nameOuters)
+  fillHelper <- tidyr::fill(fillHelper, outers, .direction = "down")
+  nameOuters <- fillHelper$outers
+  rm(fillHelper)
 
   ## Intermediate nameData tibble will help to create a list structure
 
-  nameData <- tibble::tibble(nameOuters = factor(nameOuters, levels = unique(nameOuters), ordered = TRUE), nameInners) #factor levels ensure question order is preserved
+  nameData <- tibble::tibble(
+    nameOuters = factor(nameOuters, levels = unique(nameOuters), ordered = TRUE), #order ensures question order is preserved
+    nameInners
+    )
   rm(nameOuters, nameInners)
 
   nameData <- dplyr::mutate(nameData, nameInners = replace(nameInners, nameInners == "Response" |
@@ -47,40 +48,40 @@ rename_sm <- function(x = NULL,
 
   ## Label question types for further processing
 
-  nameData <- dplyr::mutate(nameData, responseType =
-                              {
-                                get_resp_type <- function(inner.fields){
-                                  if(length(inner.fields) == 1) type <- "singleResponse"
+  get_resp_type <- function(inner.fields){
 
-                                  else if( !all(stringr::str_detect(inner.fields, "[:space:]-[:space:]"))) type <- "multipleResponses"
-                                  else {
-                                    ## They all contain " - ", so we need to check for matrix question notation
-                                    assume <- TRUE
+    has_hyphen <- function(x) stringr::str_detect(x, "[:space:]-[:space:]")
 
-                                    rowFields = stringr::str_extract(inner.fields, "^.+(?=([:space:]-[:space:]))")
-                                    colFields = stringr::str_extract(inner.fields, "(?<=([:space:]-[:space:])).+$")
+    if(length(inner.fields) == 1) type <- "singleResponse"
+    else if( !all(has_hyphen(inner.fields))) type <- "multipleResponses"
+    else {
+      assume <- TRUE
 
-                                    uniqueRows <- dplyr::n_distinct(rowFields)
-                                    uniqueCols <- dplyr::n_distinct(colFields)
+      rowFields = stringr::str_extract(inner.fields, "^.+(?=([:space:]-[:space:]))")
+      colFields = stringr::str_extract(inner.fields, "(?<=([:space:]-[:space:])).+$")
 
-                                    #
-                                    if((length(inner.fields)/uniqueRows) != uniqueCols) assume <- FALSE
+      uniqueRows <- dplyr::n_distinct(rowFields)
+      uniqueCols <- dplyr::n_distinct(colFields)
 
-                                    for(rowset in 2:(uniqueRows - 1)){
-                                      if( !all(colFields[1:uniqueCols] == colFields[rowset * uniqueCols + (1:uniqueCols)])) assume <- FALSE
-                                    }
+      if((length(inner.fields)/uniqueRows) != uniqueCols) assume <- FALSE
 
-                                    for(colset in 0:(uniqueCols - 1)){
-                                      if(!(dplyr::n_distinct(rowFields[colset * uniqueCols + (1:uniqueCols)]) == 1)) assume <- FALSE
-                                    }
+      for(rowset in 2:(uniqueRows - 1)){ #this goes backwards if you have one unique row, which causes a crash apparently?
+        if( !all(colFields[1:uniqueCols] == colFields[rowset * uniqueCols + (1:uniqueCols)])) assume <- FALSE
+      }
 
-                                    if(assume) type <- "matrix"
-                                    else type <- "multipleResponse"
-                                  }
-                                  return(type)
-                                }
-                                as.factor(get_resp_type(nameInners))
-                              })
+      for(colset in 0:(uniqueCols - 1)){
+        if(!(dplyr::n_distinct(rowFields[colset * uniqueCols + (1:uniqueCols)]) == 1)) assume <- FALSE
+      }
+
+      if(assume) type <- "matrix"
+      else type <- "multipleResponse"
+    }
+    return(type)
+  }
+
+  nameData <- dplyr::mutate(nameData, responseType = as.factor(
+    get_resp_type(nameInners)
+    ))
 
   nameData <- dplyr::mutate(nameData,
                             matrixRow = ifelse(responseType == "matrix", stringr::str_extract(nameInners, "^.+(?=([:space:]-[:space:]))"), NA),
@@ -282,5 +283,4 @@ fixedNames <- stringr::str_replace_all(fixedNames, "-", ".")
 
 fixedNames
 
-}
 
