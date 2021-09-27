@@ -1,3 +1,7 @@
+# Contents of test directory
+
+test_cases/*
+
 # History files
 .Rhistory
 .Rapp.history
